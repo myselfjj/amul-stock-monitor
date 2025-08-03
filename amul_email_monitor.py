@@ -24,6 +24,16 @@ import logging
 from threading import Thread
 from flask import Flask
 
+# Telegram bot imports
+try:
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+    import re
+    TELEGRAM_AVAILABLE = True
+except ImportError:
+    TELEGRAM_AVAILABLE = False
+    logging.warning("Telegram bot not available - install python-telegram-bot to enable remote control")
+
 # Configure logging for server deployment
 logging.basicConfig(
     level=logging.INFO,
@@ -35,9 +45,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Configuration ---
-CONFIG_FILE = "email_config.json"
-NOTIFIED_PRODUCTS_CACHE = {}
+# Configuration
+CONFIG_FILE = 'email_config.json'
 
 # --- High-Accuracy Stock Checking Function ---
 def check_stock(driver, product):
@@ -367,7 +376,7 @@ def run_monitor():
                         dropdown_clicked = True
                     except:
                         logger.info("Could not find location button either")
-                
+                    
                 time.sleep(3)  # Wait for page to update with pincode
                 logger.info("✅ Pincode has been set for this session!")
             else:
@@ -408,6 +417,388 @@ def root():
 def run_flask_app():
     app.run(host='0.0.0.0', port=5000)
 
+# Telegram Bot Controller (Comprehensive)
+class TelegramController:
+    def __init__(self, bot_token, authorized_users):
+        self.bot_token = bot_token
+        self.authorized_users = authorized_users
+        
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start command"""
+        user_id = update.effective_user.id
+        if user_id not in self.authorized_users:
+            await update.message.reply_text("❌ Unauthorized access!")
+            return
+        
+        keyboard = [
+            [InlineKeyboardButton("📊 View Status", callback_data="status")],
+            [InlineKeyboardButton("📦 Manage Products", callback_data="manage_products")],
+            [InlineKeyboardButton("📧 Manage Emails", callback_data="manage_emails")],
+            [InlineKeyboardButton("📍 Change Pincode", callback_data="change_pincode")],
+            [InlineKeyboardButton("⏰ Change Interval", callback_data="manage_interval")],
+            [InlineKeyboardButton("🔄 Manual Check", callback_data="manual_check")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "🤖 *Amul Stock Monitor Controller*\n\n"
+            "🎯 Monitor Status: ACTIVE\n"
+            "📦 Products: Checking every cycle\n"
+            "📧 Emails: Ready to send alerts\n\n"
+            "Use buttons below for full control:",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    
+    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle button callbacks"""
+        query = update.callback_query
+        user_id = query.from_user.id
+        
+        if user_id not in self.authorized_users:
+            await query.answer("❌ Unauthorized!")
+            return
+        
+        await query.answer()
+        
+        config = load_config()
+        if not config:
+            await query.edit_message_text("❌ Failed to load configuration!")
+            return
+        
+        if query.data == "status":
+            text = f"📊 *Monitor Status*\n\n"
+            text += f"📍 Pincode: `{config['pincode']}`\n"
+            text += f"⏰ Interval: `{config['monitoring']['check_interval_minutes']} minutes`\n"
+            text += f"📦 Products: `{len(config['products'])}`\n"
+            text += f"📧 Recipients: `{len(config['email']['recipient_emails'])}`\n\n"
+            text += "*Products:*\n"
+            for i, product in enumerate(config['products']):
+                text += f"{i+1}. {product['name'][:40]}...\n"
+            text += f"\n*Email Recipients:*\n"
+            for email in config['email']['recipient_emails']:
+                text += f"• {email}\n"
+            
+            keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+            
+        elif query.data == "manage_emails":
+            text = f"📧 *Email Management*\n\n*Current Recipients:*\n"
+            keyboard = []
+            
+            for i, email in enumerate(config['email']['recipient_emails']):
+                text += f"{i+1}. {email}\n"
+                keyboard.append([InlineKeyboardButton(f"❌ Remove: {email[:20]}...", callback_data=f"remove_email_{i}")])
+            
+            keyboard.append([InlineKeyboardButton("➕ Add New Email", callback_data="add_email")])
+            keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_main")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+            
+        elif query.data == "manage_products":
+            text = f"📦 *Product Management*\n\n*Currently Monitoring:*\n"
+            keyboard = []
+            
+            for i, product in enumerate(config['products']):
+                text += f"{i+1}. {product['name'][:35]}...\n"
+                keyboard.append([InlineKeyboardButton(f"❌ Remove: {product['name'][:25]}...", callback_data=f"remove_product_{i}")])
+            
+            keyboard.append([InlineKeyboardButton("➕ Add New Product", callback_data="add_product_step1")])
+            keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_main")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+            
+        elif query.data == "manage_interval":
+            current_interval = config['monitoring']['check_interval_minutes']
+            text = f"⏰ *Interval Management*\n\n"
+            text += f"Current: `{current_interval} minutes`\n\n"
+            text += "Choose new interval:"
+            
+            keyboard = [
+                [InlineKeyboardButton("🚀 5 minutes (faster)", callback_data="set_interval_5")],
+                [InlineKeyboardButton("⚖️ 10 minutes (balanced)", callback_data="set_interval_10")],
+                [InlineKeyboardButton("💰 15 minutes (cheaper)", callback_data="set_interval_15")],
+                [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+            
+        elif query.data == "change_pincode":
+            keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📍 *Change Pincode*\n\n"
+                f"Current pincode: `{config['pincode']}`\n\n"
+                "Please send me the new pincode (6 digits):",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            context.user_data['waiting_for'] = 'pincode'
+            
+        elif query.data == "add_email":
+            keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="manage_emails")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📧 *Add New Email*\n\n"
+                "Please send me the email address:",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            context.user_data['waiting_for'] = 'email'
+            
+        elif query.data == "add_product_step1":
+            keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="manage_products")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📦 *Add New Product - Step 1/2*\n\n"
+                "Please send me the product name:\n"
+                "Example: `Amul Gold Full Cream Milk 1L`",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            context.user_data['waiting_for'] = 'product_name'
+            
+        elif query.data.startswith("remove_product_"):
+            product_index = int(query.data.split("_")[2])
+            removed_product = config['products'].pop(product_index)
+            
+            if self.save_config(config):
+                await query.edit_message_text(
+                    f"✅ *Product Removed!*\n\n"
+                    f"Removed: `{removed_product['name']}`\n\n"
+                    f"Remaining products: {len(config['products'])}",
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.edit_message_text("❌ Failed to save configuration!")
+                
+        elif query.data.startswith("remove_email_"):
+            email_index = int(query.data.split("_")[2])
+            removed_email = config['email']['recipient_emails'].pop(email_index)
+            
+            if self.save_config(config):
+                await query.edit_message_text(
+                    f"✅ *Email Removed!*\n\n"
+                    f"Removed: `{removed_email}`\n\n"
+                    f"Remaining emails: {len(config['email']['recipient_emails'])}",
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.edit_message_text("❌ Failed to save configuration!")
+                
+        elif query.data.startswith("set_interval_"):
+            interval = int(query.data.split("_")[2])
+            config['monitoring']['check_interval_minutes'] = interval
+            
+            if self.save_config(config):
+                cost_msg = {
+                    5: "⚡ Faster alerts, higher cost (~$15-20/month)",
+                    10: "⚖️ Balanced option (~$8-12/month)", 
+                    15: "💰 Cheaper option (~$5-8/month)"
+                }
+                
+                await query.edit_message_text(
+                    f"✅ *Interval Updated!*\n\n"
+                    f"⏰ New interval: `{interval} minutes`\n"
+                    f"{cost_msg[interval]}\n\n"
+                    f"⚠️ *Note:* Restart required for effect.",
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.edit_message_text("❌ Failed to update interval!")
+                
+        elif query.data == "add_product_step2":
+            keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="manage_products")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📦 *Add New Product - Step 2/2*\n\n"
+                "Please send me the product URL:\n"
+                "Example: `https://www.example.com/amul-gold-full-cream-milk-1l`",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            context.user_data['waiting_for'] = 'product_url'
+            
+        elif query.data == "manual_check":
+            await query.edit_message_text("🔄 *Manual Check Started!*\n\nChecking all products now...")
+            # Trigger the actual run_monitor function
+            from threading import Thread
+            Thread(target=run_monitor).start()
+            await asyncio.sleep(2)
+            await query.edit_message_text("✅ *Manual Check Complete!*\n\nCheck your emails for any alerts!")
+            
+        elif query.data == "back_main":
+            await self.show_main_menu(query)
+
+    async def show_main_menu(self, query):
+        """Show main menu from callback"""
+        keyboard = [
+            [InlineKeyboardButton("📊 View Status", callback_data="status")],
+            [InlineKeyboardButton("📦 Manage Products", callback_data="manage_products")],
+            [InlineKeyboardButton("📧 Manage Emails", callback_data="manage_emails")],
+            [InlineKeyboardButton("📍 Change Pincode", callback_data="change_pincode")],
+            [InlineKeyboardButton("⏰ Change Interval", callback_data="manage_interval")],
+            [InlineKeyboardButton("🔄 Manual Check", callback_data="manual_check")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🤖 *Amul Stock Monitor Controller*\n\n"
+            "🎯 Monitor Status: ACTIVE\n"
+            "📦 Products: Checking every cycle\n"
+            "📧 Emails: Ready to send alerts\n\n"
+            "Use buttons below for full control:",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+
+    async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle text input for pincode/email"""
+        user_id = update.effective_user.id
+        
+        if user_id not in self.authorized_users:
+            return
+        
+        waiting_for = context.user_data.get('waiting_for')
+        text = update.message.text.strip()
+        
+        config = load_config()
+        if not config:
+            await update.message.reply_text("❌ Error loading configuration!")
+            return
+        
+        if waiting_for == 'pincode':
+            # Validate pincode (6 digits)
+            if re.match(r'^\d{6}$', text):
+                config['pincode'] = text
+                if self.save_config(config):
+                    await update.message.reply_text(
+                        f"✅ *Pincode Updated!*\n\n"
+                        f"New pincode: `{text}`\n\n"
+                        f"This will take effect on next check cycle.",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text("❌ Failed to save configuration!")
+            else:
+                await update.message.reply_text("❌ Invalid pincode! Please send 6 digits (e.g., 500018)")
+                return
+                
+        elif waiting_for == 'email':
+            # Validate email
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if re.match(email_pattern, text):
+                if text not in config['email']['recipient_emails']:
+                    config['email']['recipient_emails'].append(text)
+                    if self.save_config(config):
+                        await update.message.reply_text(
+                            f"✅ *Email Added!*\n\n"
+                            f"Added: `{text}`\n\n"
+                            f"Total recipients: {len(config['email']['recipient_emails'])}",
+                            parse_mode='Markdown'
+                        )
+                    else:
+                        await update.message.reply_text("❌ Failed to save configuration!")
+                else:
+                    await update.message.reply_text("❌ Email already exists!")
+            else:
+                await update.message.reply_text("❌ Invalid email format! Please send a valid email address.")
+                return
+        
+        elif waiting_for == 'product_name':
+            # Validate product name
+            if len(text) > 5:
+                context.user_data['product_name'] = text
+                await update.message.reply_text(
+                    f"✅ *Product Name Saved!*\n\n"
+                    f"Name: `{text}`\n\n"
+                    f"Please send the product URL now.",
+                    parse_mode='Markdown'
+                )
+                context.user_data['waiting_for'] = 'product_url'
+            else:
+                await update.message.reply_text("❌ Invalid product name! Please send a valid name.")
+                return
+        
+        elif waiting_for == 'product_url':
+            # Validate product URL
+            url_pattern = r'^https?://[^\s]+'
+            if re.match(url_pattern, text):
+                product_name = context.user_data['product_name']
+                product_url = text
+                new_product = {
+                    'name': product_name,
+                    'url': product_url,
+                    'price': 'N/A'
+                }
+                config['products'].append(new_product)
+                if self.save_config(config):
+                    await update.message.reply_text(
+                        f"✅ *Product Added!*\n\n"
+                        f"Name: `{product_name}`\n"
+                        f"URL: `{product_url}`\n\n"
+                        f"Total products: {len(config['products'])}\n\n"
+                        f"✅ *Immediate Check Complete!*",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text("❌ Failed to save configuration!")
+            else:
+                await update.message.reply_text("❌ Invalid product URL! Please send a valid URL.")
+                return
+        
+        # Clear waiting state
+        context.user_data['waiting_for'] = None
+    
+    def save_config(self, config):
+        """Save configuration"""
+        try:
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=4)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}")
+            return False
+
+def run_telegram_bot():
+    """Run Telegram bot in background"""
+    if not TELEGRAM_AVAILABLE:
+        logger.info("⚠️ Telegram bot disabled - python-telegram-bot not installed")
+        return
+    
+    BOT_TOKEN = "8042722432:AAH2vDuqwDpChCZYpVKPZSIbsrAlx28OI1g"
+    AUTHORIZED_USERS = [616312112]
+    
+    try:
+        controller = TelegramController(BOT_TOKEN, AUTHORIZED_USERS)
+        application = Application.builder().token(BOT_TOKEN).build()
+        
+        application.add_handler(CommandHandler("start", controller.start))
+        application.add_handler(CallbackQueryHandler(controller.button_handler))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, controller.handle_text_input))
+        
+        logger.info("🤖 Telegram Bot Controller started!")
+        application.run_polling()
+    except Exception as e:
+        logger.error(f"❌ Failed to start Telegram bot: {e}")
+        logger.info("📧 Monitor will continue running without bot control")
+
+def load_config():
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.error(f"FATAL: Config file '{CONFIG_FILE}' not found.")
+        return None
+
 if __name__ == "__main__":
     logger.info("🚀 Self-Contained Amul Stock Monitor has started.")
     logger.info("The first check will run now, then every 10 minutes.")
@@ -415,6 +806,10 @@ if __name__ == "__main__":
     flask_thread = Thread(target=run_flask_app)
     flask_thread.daemon = True  # Allow main thread to exit even if flask thread is still running
     flask_thread.start()
+
+    telegram_thread = Thread(target=run_telegram_bot)
+    telegram_thread.daemon = True  # Allow main thread to exit even if telegram thread is still running
+    telegram_thread.start()
 
     run_monitor()
     schedule.every(10).minutes.do(run_monitor)
