@@ -840,17 +840,22 @@ if __name__ == "__main__":
     logger.info("🚀 Self-Contained Amul Stock Monitor has started.")
     logger.info("The first check will run now, then every 10 minutes.")
 
+    # Start Flask health endpoint in background
     flask_thread = Thread(target=run_flask_app)
     flask_thread.daemon = True  # Allow main thread to exit even if flask thread is still running
     flask_thread.start()
 
-    telegram_thread = Thread(target=run_telegram_bot)
-    telegram_thread.daemon = True  # Allow main thread to exit even if telegram thread is still running
-    telegram_thread.start()
+    # Start monitoring in background thread instead of main thread
+    def run_monitoring_loop():
+        run_monitor()  # Initial check
+        schedule.every(10).minutes.do(run_monitor)
+        while True:
+            schedule.run_pending()
+            time.sleep(30)  # Check every 30 seconds
+    
+    monitor_thread = Thread(target=run_monitoring_loop)
+    monitor_thread.daemon = True
+    monitor_thread.start()
 
-    run_monitor()
-    schedule.every(10).minutes.do(run_monitor)
-
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    # Run Telegram bot in MAIN thread (this should fix the asyncio issue)
+    run_telegram_bot()
