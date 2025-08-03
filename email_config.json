@@ -1,0 +1,40 @@
+{
+    "pincode": "500018",
+    "email": {
+        "smtp_server": "smtp.gmail.com",
+        "smtp_port": 587,
+        "sender_email": "jayeshjadhav1411@gmail.com",
+        "sender_password": "fryw geyo nisc hatv",
+        "recipient_emails": [
+            "theofficialjayesh@gmail.com"
+        ]
+    },
+    "products": [
+
+        {
+            "name": "Amul Kool Protein Milkshake | Vanilla, 180 mL | Pack of 30",
+            "url": "https://shop.amul.com/en/product/amul-kool-protein-milkshake-or-vanilla-180-ml-or-pack-of-30",
+            "price": "₹1200"
+        },
+        {
+            "name": "Amul High Protein Rose Lassi, 200 mL | Pack of 30",
+            "url": "https://shop.amul.com/product/amul-high-protein-rose-lassi-200-ml-or-pack-of-30",
+            "price": "₹750"
+        },
+        {
+            "name": "Amul High Protein Plain Lassi, 200 mL | Pack of 30",
+            "url": "https://shop.amul.com/en/product/amul-high-protein-plain-lassi-200-ml-or-pack-of-30",
+            "price": "₹1500"
+        },
+        {
+            "name": "Amul High Protein Blueberry Shake, 200 mL | Pack of 30",
+            "url": "https://shop.amul.com/en/product/amul-high-protein-blueberry-shake-200-ml-or-pack-of-30",
+            "price": "₹1500"
+        }
+    ],
+    "monitoring": {
+        "check_interval_minutes": 30,
+        "notification_cooldown_hours": 2,
+        "max_retries": 3
+    }
+}

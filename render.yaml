@@ -1,0 +1,19 @@
+# 🟦 Render.com Deployment Configuration
+services:
+  - type: web
+    name: amul-stock-monitor
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: DISPLAY
+        value: ":99"
+      - key: CHROME_BIN
+        value: "/usr/bin/google-chrome"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    # Health check endpoint (optional)
+    healthCheckPath: /health
+    
+    # Auto-restart on failure
+    autoDeploy: true
