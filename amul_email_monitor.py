@@ -509,7 +509,7 @@ class TelegramController:
                 text += f"{i+1}. {product['name'][:35]}...\n"
                 keyboard.append([InlineKeyboardButton(f"❌ Remove: {product['name'][:25]}...", callback_data=f"remove_product_{i}")])
             
-            keyboard.append([InlineKeyboardButton("➕ Add New Product", callback_data="add_product_step1")])
+            keyboard.append([InlineKeyboardButton("➕ Add New Product (1/3)", callback_data="add_product")])
             keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_main")])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -556,18 +556,44 @@ class TelegramController:
             )
             context.user_data['waiting_for'] = 'email'
             
-        elif query.data == "add_product_step1":
+        elif query.data == "add_product":
             keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="manage_products")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                "📦 *Add New Product - Step 1/2*\n\n"
+                "📦 *Add New Product - Step 1/3*\n\n"
                 "Please send me the product name:\n"
                 "Example: `Amul Gold Full Cream Milk 1L`",
                 parse_mode='Markdown',
                 reply_markup=reply_markup
             )
             context.user_data['waiting_for'] = 'product_name'
+            
+        elif query.data == "add_product_step2":
+            keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="manage_products")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📦 *Add New Product - Step 2/3*\n\n"
+                "Please send me the product URL:\n"
+                "Example: `https://www.example.com/amul-gold-full-cream-milk-1l`",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            context.user_data['waiting_for'] = 'product_url'
+            
+        elif query.data == "add_product_step3":
+            keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="manage_products")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📦 *Add New Product - Step 3/3*\n\n"
+                "Please send me the product price:\n"
+                "Example: `₹45`, `$5.99`, or `N/A`",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            context.user_data['waiting_for'] = 'product_price'
             
         elif query.data.startswith("remove_product_"):
             product_index = int(query.data.split("_")[2])
@@ -625,19 +651,6 @@ class TelegramController:
                 logger.error(f"❌ Telegram Bot: Failed to update interval from {old_interval} to {interval} for user {query.from_user.id}")
                 await query.edit_message_text("❌ Failed to update interval!")
                 
-        elif query.data == "add_product_step2":
-            keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="manage_products")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_text(
-                "📦 *Add New Product - Step 2/2*\n\n"
-                "Please send me the product URL:\n"
-                "Example: `https://www.example.com/amul-gold-full-cream-milk-1l`",
-                parse_mode='Markdown',
-                reply_markup=reply_markup
-            )
-            context.user_data['waiting_for'] = 'product_url'
-            
         elif query.data == "manual_check":
             logger.info(f"🔄 Telegram Bot: Manual check triggered by user {query.from_user.id}")
             await query.edit_message_text("🔄 *Manual Check Started!*\n\nChecking all products now...")
@@ -692,7 +705,7 @@ class TelegramController:
             if re.match(r'^\d{6}$', text):
                 config['pincode'] = text
                 if self.save_config(config):
-                    logger.info(f"📍 Telegram Bot: Pincode updated to '{text}' by user {query.from_user.id}")
+                    logger.info(f"📍 Telegram Bot: Pincode updated to '{text}' by user {user_id}")
                     await update.message.reply_text(
                         f"✅ *Pincode Updated!*\n\n"
                         f"New pincode: `{text}`\n\n"
@@ -712,7 +725,7 @@ class TelegramController:
                 if text not in config['email']['recipient_emails']:
                     config['email']['recipient_emails'].append(text)
                     if self.save_config(config):
-                        logger.info(f"📧 Telegram Bot: Email '{text}' added by user {query.from_user.id}")
+                        logger.info(f"📧 Telegram Bot: Email '{text}' added by user {user_id}")
                         await update.message.reply_text(
                             f"✅ *Email Added!*\n\n"
                             f"Added: `{text}`\n\n"
@@ -738,40 +751,88 @@ class TelegramController:
                     parse_mode='Markdown'
                 )
                 context.user_data['waiting_for'] = 'product_url'
+                return  # Don't clear waiting state yet
             else:
-                await update.message.reply_text("❌ Invalid product name! Please send a valid name.")
+                await update.message.reply_text("❌ Invalid product name! Please send a name with more than 5 characters.")
                 return
         
         elif waiting_for == 'product_url':
             # Validate product URL
             url_pattern = r'^https?://[^\s]+'
             if re.match(url_pattern, text):
-                product_name = context.user_data['product_name']
-                product_url = text
-                new_product = {
-                    'name': product_name,
-                    'url': product_url,
-                    'price': 'N/A'
-                }
-                config['products'].append(new_product)
-                if self.save_config(config):
-                    logger.info(f"📦 Telegram Bot: Product '{product_name}' added by user {query.from_user.id}")
-                    await update.message.reply_text(
-                        f"✅ *Product Added!*\n\n"
-                        f"Name: `{product_name}`\n"
-                        f"URL: `{product_url}`\n\n"
-                        f"Total products: {len(config['products'])}\n\n"
-                        f"✅ *Immediate Check Complete!*",
-                        parse_mode='Markdown'
-                    )
-                else:
-                    await update.message.reply_text("❌ Failed to save configuration!")
+                product_name = context.user_data.get('product_name')
+                if not product_name:
+                    await update.message.reply_text("❌ Error: Product name not found. Please start over.")
+                    context.user_data.clear()
+                    return
+                    
+                context.user_data['product_url'] = text
+                await update.message.reply_text(
+                    f"✅ *Product URL Saved!*\n\n"
+                    f"Name: `{product_name}`\n"
+                    f"URL: `{text}`\n\n"
+                    f"Please send the product price now (e.g., ₹45, $5.99, or 'N/A').",
+                    parse_mode='Markdown'
+                )
+                context.user_data['waiting_for'] = 'product_price'
+                return  # Don't clear waiting state yet
             else:
-                await update.message.reply_text("❌ Invalid product URL! Please send a valid URL.")
+                await update.message.reply_text("❌ Invalid URL! Please send a valid URL starting with http:// or https://")
                 return
         
+        elif waiting_for == 'product_price':
+            # Validate and save product with price
+            product_name = context.user_data.get('product_name')
+            product_url = context.user_data.get('product_url')
+            
+            if not product_name or not product_url:
+                await update.message.reply_text("❌ Error: Product data missing. Please start over.")
+                context.user_data.clear()
+                return
+            
+            # Clean up price input
+            price = text.strip()
+            if len(price) == 0:
+                price = 'N/A'
+                
+            new_product = {
+                'name': product_name,
+                'url': product_url,
+                'price': price
+            }
+            config['products'].append(new_product)
+            if self.save_config(config):
+                logger.info(f"📦 Telegram Bot: Product '{product_name}' (₹{price}) added by user {user_id}")
+                await update.message.reply_text(
+                    f"✅ *Product Added Successfully!*\n\n"
+                    f"📦 Name: `{product_name}`\n"
+                    f"🔗 URL: `{product_url}`\n"
+                    f"💰 Price: `{price}`\n\n"
+                    f"Total products: {len(config['products'])}\n\n"
+                    f"🔄 *Triggering immediate check...*",
+                    parse_mode='Markdown'
+                )
+                
+                # Trigger immediate check in background
+                def immediate_check():
+                    try:
+                        logger.info(f"🔄 Telegram Bot: Immediate check triggered by user {user_id}")
+                        run_monitor()
+                    except Exception as e:
+                        logger.error(f"❌ Immediate check failed: {e}")
+                
+                import threading
+                check_thread = threading.Thread(target=immediate_check)
+                check_thread.daemon = True
+                check_thread.start()
+                
+            else:
+                await update.message.reply_text("❌ Failed to save configuration!")
+            
+            return
+        
         # Clear waiting state
-        context.user_data['waiting_for'] = None
+        context.user_data.clear()
     
     def save_config(self, config):
         """Save configuration"""
