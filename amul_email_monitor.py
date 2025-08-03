@@ -48,6 +48,9 @@ logger = logging.getLogger(__name__)
 # Configuration
 CONFIG_FILE = 'email_config.json'
 
+# Global cache to track notified products (prevents duplicate notifications)
+NOTIFIED_PRODUCTS_CACHE = {}
+
 # --- High-Accuracy Stock Checking Function ---
 def check_stock(driver, product):
     """
@@ -570,6 +573,7 @@ class TelegramController:
             removed_product = config['products'].pop(product_index)
             
             if self.save_config(config):
+                logger.info(f"📦 Telegram Bot: Removed product '{removed_product['name']}' by user {query.from_user.id}")
                 await query.edit_message_text(
                     f"✅ *Product Removed!*\n\n"
                     f"Removed: `{removed_product['name']}`\n\n"
@@ -577,6 +581,7 @@ class TelegramController:
                     parse_mode='Markdown'
                 )
             else:
+                logger.error(f"❌ Telegram Bot: Failed to remove product '{removed_product['name']}' for user {query.from_user.id}")
                 await query.edit_message_text("❌ Failed to save configuration!")
                 
         elif query.data.startswith("remove_email_"):
@@ -584,6 +589,7 @@ class TelegramController:
             removed_email = config['email']['recipient_emails'].pop(email_index)
             
             if self.save_config(config):
+                logger.info(f"📧 Telegram Bot: Removed email '{removed_email}' by user {query.from_user.id}")
                 await query.edit_message_text(
                     f"✅ *Email Removed!*\n\n"
                     f"Removed: `{removed_email}`\n\n"
@@ -591,13 +597,16 @@ class TelegramController:
                     parse_mode='Markdown'
                 )
             else:
+                logger.error(f"❌ Telegram Bot: Failed to remove email '{removed_email}' for user {query.from_user.id}")
                 await query.edit_message_text("❌ Failed to save configuration!")
                 
         elif query.data.startswith("set_interval_"):
             interval = int(query.data.split("_")[2])
+            old_interval = config['monitoring']['check_interval_minutes']
             config['monitoring']['check_interval_minutes'] = interval
             
             if self.save_config(config):
+                logger.info(f"⏰ Telegram Bot: Interval changed from {old_interval} to {interval} minutes by user {query.from_user.id}")
                 cost_msg = {
                     5: "⚡ Faster alerts, higher cost (~$15-20/month)",
                     10: "⚖️ Balanced option (~$8-12/month)", 
@@ -612,6 +621,7 @@ class TelegramController:
                     parse_mode='Markdown'
                 )
             else:
+                logger.error(f"❌ Telegram Bot: Failed to update interval from {old_interval} to {interval} for user {query.from_user.id}")
                 await query.edit_message_text("❌ Failed to update interval!")
                 
         elif query.data == "add_product_step2":
@@ -628,6 +638,7 @@ class TelegramController:
             context.user_data['waiting_for'] = 'product_url'
             
         elif query.data == "manual_check":
+            logger.info(f"🔄 Telegram Bot: Manual check triggered by user {query.from_user.id}")
             await query.edit_message_text("🔄 *Manual Check Started!*\n\nChecking all products now...")
             # Trigger the actual run_monitor function
             from threading import Thread
@@ -680,6 +691,7 @@ class TelegramController:
             if re.match(r'^\d{6}$', text):
                 config['pincode'] = text
                 if self.save_config(config):
+                    logger.info(f"📍 Telegram Bot: Pincode updated to '{text}' by user {query.from_user.id}")
                     await update.message.reply_text(
                         f"✅ *Pincode Updated!*\n\n"
                         f"New pincode: `{text}`\n\n"
@@ -699,6 +711,7 @@ class TelegramController:
                 if text not in config['email']['recipient_emails']:
                     config['email']['recipient_emails'].append(text)
                     if self.save_config(config):
+                        logger.info(f"📧 Telegram Bot: Email '{text}' added by user {query.from_user.id}")
                         await update.message.reply_text(
                             f"✅ *Email Added!*\n\n"
                             f"Added: `{text}`\n\n"
@@ -741,6 +754,7 @@ class TelegramController:
                 }
                 config['products'].append(new_product)
                 if self.save_config(config):
+                    logger.info(f"📦 Telegram Bot: Product '{product_name}' added by user {query.from_user.id}")
                     await update.message.reply_text(
                         f"✅ *Product Added!*\n\n"
                         f"Name: `{product_name}`\n"
