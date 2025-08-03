@@ -23,6 +23,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 import logging
 from threading import Thread
 from flask import Flask
+import os
 
 # Telegram bot imports
 try:
@@ -788,10 +789,27 @@ def run_telegram_bot():
         logger.info("⚠️ Telegram bot disabled - python-telegram-bot not installed")
         return
     
-    BOT_TOKEN = "8042722432:AAH2vDuqwDpChCZYpVKPZSIbsrAlx28OI1g"
-    AUTHORIZED_USERS = [616312112]
+    # Get credentials from environment variables
+    BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    AUTHORIZED_USERS_STR = os.getenv('TELEGRAM_AUTHORIZED_USERS', '')
+    
+    if not BOT_TOKEN:
+        logger.error("❌ TELEGRAM_BOT_TOKEN environment variable not set!")
+        logger.info("📧 Monitor will continue running without bot control")
+        return
     
     try:
+        # Parse authorized users (comma-separated list)
+        AUTHORIZED_USERS = []
+        if AUTHORIZED_USERS_STR:
+            AUTHORIZED_USERS = [int(user_id.strip()) for user_id in AUTHORIZED_USERS_STR.split(',')]
+        
+        if not AUTHORIZED_USERS:
+            logger.warning("⚠️ No authorized users set - bot will not respond to anyone")
+            return
+            
+        logger.info(f"🤖 Starting Telegram bot with {len(AUTHORIZED_USERS)} authorized users...")
+        
         controller = TelegramController(BOT_TOKEN, AUTHORIZED_USERS)
         application = Application.builder().token(BOT_TOKEN).build()
         
@@ -799,7 +817,7 @@ def run_telegram_bot():
         application.add_handler(CallbackQueryHandler(controller.button_handler))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, controller.handle_text_input))
         
-        logger.info("🤖 Telegram Bot Controller started!")
+        logger.info("🤖 Telegram Bot Controller started successfully!")
         application.run_polling()
     except Exception as e:
         logger.error(f"❌ Failed to start Telegram bot: {e}")
