@@ -818,9 +818,14 @@ def run_telegram_bot():
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, controller.handle_text_input))
         
         logger.info("🤖 Telegram Bot Controller started successfully!")
-        application.run_polling()
+        
+        # Simple approach - let python-telegram-bot handle the event loop
+        application.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
+        
     except Exception as e:
         logger.error(f"❌ Failed to start Telegram bot: {e}")
+        import traceback
+        logger.error(f"❌ Full error trace: {traceback.format_exc()}")
         logger.info("📧 Monitor will continue running without bot control")
 
 def load_config():
