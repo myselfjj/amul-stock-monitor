@@ -6,6 +6,8 @@
   "deploy": {
     "startCommand": "python amul_email_monitor.py",
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
+    "restartPolicyMaxRetries": 10,
+    "healthcheckPath": null,
+    "healthcheckTimeout": null
   }
 }

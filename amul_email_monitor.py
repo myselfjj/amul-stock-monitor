@@ -21,6 +21,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 import logging
+from threading import Thread
+from flask import Flask
 
 # Configure logging for server deployment
 logging.basicConfig(
@@ -99,7 +101,7 @@ def check_stock(driver, product):
                                         return False
                                 except:
                                     # If we can't get location, be conservative and assume sold out
-                                    logger.info("❌ Status: OUT OF STOCK (Found 'Sold Out' near cart button - location check failed)")
+                                    logger.info("❌ Status: OUT OF STOCK (Found 'Sold Out' near main cart button - location check failed)")
                                     return False
                     
                     logger.info("No 'Sold Out' found near main cart button")
@@ -166,7 +168,7 @@ def send_email(config, product):
     body = f"""
     Hello,
 
-    Great news! The product you are monitoring is now available for purchase.
+    Great news! The product you're monitoring is now available:
 
     📦 Product: {product['name']}
     💰 Price: {product['price']}
@@ -344,7 +346,7 @@ def run_monitor():
                                         logger.info(f"Clicking on dropdown item: '{elem_text}'")
                                         driver.execute_script("arguments[0].click();", elem)  # Use JS click for reliability
                                         dropdown_clicked = True
-                                        logger.info("Successfully clicked pincode dropdown!")
+                                        logger.info("✅ Successfully clicked pincode dropdown!")
                                         break
                             except Exception as e:
                                 logger.error(f"Error clicking dropdown element: {e}")
@@ -392,9 +394,27 @@ def run_monitor():
     logger.info("--- Monitor Cycle Complete ---")
 
 
+# Flask app for health endpoint
+app = Flask(__name__)
+
+@app.route('/health')
+def health():
+    return {"status": "healthy", "service": "amul-stock-monitor"}, 200
+
+@app.route('/')
+def root():
+    return {"message": "Amul Stock Monitor is running", "status": "active"}, 200
+
+def run_flask_app():
+    app.run(host='0.0.0.0', port=5000)
+
 if __name__ == "__main__":
     logger.info("🚀 Self-Contained Amul Stock Monitor has started.")
     logger.info("The first check will run now, then every 10 minutes.")
+
+    flask_thread = Thread(target=run_flask_app)
+    flask_thread.daemon = True  # Allow main thread to exit even if flask thread is still running
+    flask_thread.start()
 
     run_monitor()
     schedule.every(10).minutes.do(run_monitor)
