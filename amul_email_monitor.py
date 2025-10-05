@@ -13,6 +13,14 @@ import asyncio
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
+# SendGrid imports (optional)
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail
+    SENDGRID_AVAILABLE = True
+except ImportError:
+    SENDGRID_AVAILABLE = False
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -171,33 +179,82 @@ def check_stock(driver, product):
         logger.error(f"An unexpected error occurred while checking stock: {e}")
         return False
 
-# --- Email Notification Function (Modified to support multiple recipient email addresses) ---
+# --- Email Notification Function (Supports SendGrid API and Gmail SMTP) ---
 def send_email(config, product):
-    """Sends an email notification for a restocked product to multiple recipients."""
+    """Sends an email notification for a restocked product to multiple recipients.
+    Uses SendGrid API if available (for Render), falls back to Gmail SMTP (for local)."""
     sender_email = config['email']['sender_email']
     sender_password = config['email']['sender_password']
-    recipient_emails = config['email']['recipient_emails']  # Now supports multiple emails
+    recipient_emails = config['email']['recipient_emails']
     
     subject = f"🎉 STOCK ALERT: {product['name']} is Back in Stock!"
-    body = f"""
-    Hello,
+    body = f"""Hello,
 
-    Great news! The product you're monitoring is now available:
+Great news! The product you're monitoring is now available:
 
-    📦 Product: {product['name']}
-    💰 Price: {product['price']}
-    📍 Pincode: {config['pincode']}
+📦 Product: {product['name']}
+💰 Price: {product['price']}
+📍 Pincode: {config['pincode']}
+
+🛒 Order now:
+{product['url']}
+
+⚡ This is an automated alert from your Amul Stock Monitor.
+Act fast - items may go out of stock quickly!
+
+Happy Shopping! 🛍️
+- Your Amul Stock Monitor Bot 🤖
+"""
     
-    🛒 Order now:
-    {product['url']}
-
-    ⚡ This is an automated alert from your Amul Stock Monitor.
-    Act fast - items may go out of stock quickly!
-
-    Happy Shopping! 🛍️
-    - Your Amul Stock Monitor Bot 🤖
-    """
+    # Try SendGrid first (works on Render)
+    sendgrid_api_key = os.getenv('SENDGRID_API_KEY')
     
+    if SENDGRID_AVAILABLE and sendgrid_api_key:
+        logger.info("📧 Using SendGrid API for email delivery...")
+        return send_email_via_sendgrid(sender_email, recipient_emails, subject, body, sendgrid_api_key, product)
+    else:
+        logger.info("📧 Using Gmail SMTP for email delivery...")
+        return send_email_via_smtp(sender_email, sender_password, recipient_emails, subject, body, product)
+
+def send_email_via_sendgrid(sender_email, recipient_emails, subject, body, api_key, product):
+    """Send email using SendGrid API"""
+    try:
+        successful_sends = 0
+        
+        for recipient in recipient_emails:
+            try:
+                message = Mail(
+                    from_email=sender_email,
+                    to_emails=recipient,
+                    subject=subject,
+                    plain_text_content=body
+                )
+                
+                sg = SendGridAPIClient(api_key)
+                response = sg.send(message)
+                
+                if response.status_code in [200, 201, 202]:
+                    logger.info(f"📧 ✅ Email sent successfully to: {recipient} (SendGrid)")
+                    successful_sends += 1
+                else:
+                    logger.error(f"📧 ❌ SendGrid error for {recipient}: Status {response.status_code}")
+                    
+            except Exception as e:
+                logger.error(f"📧 ❌ Failed to send email to {recipient} via SendGrid: {e}")
+        
+        total_recipients = len(recipient_emails)
+        logger.info(f"📧 📊 Email Summary: {successful_sends}/{total_recipients} sent successfully (SendGrid)")
+        if successful_sends > 0:
+            logger.info(f"📧 🎉 Stock alert notification sent for {product['name']}")
+        
+        return successful_sends > 0
+        
+    except Exception as e:
+        logger.error(f"🚨 SendGrid API error: {e}")
+        return False
+
+def send_email_via_smtp(sender_email, sender_password, recipient_emails, subject, body, product):
+    """Send email using Gmail SMTP (fallback for local testing)"""
     try:
         # Create message
         msg = MIMEMultipart()
@@ -910,8 +967,16 @@ def run_telegram_bot():
         
         logger.info("🤖 Telegram Bot Controller started successfully!")
         
-        # Run in the new event loop
-        application.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
+        # Run polling in the event loop (works in background threads)
+        async def run_bot():
+            await application.initialize()
+            await application.start()
+            await application.updater.start_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
+            # Keep running until stopped
+            while True:
+                await asyncio.sleep(1)
+        
+        loop.run_until_complete(run_bot())
         
     except Exception as e:
         logger.error(f"❌ Failed to start Telegram bot: {e}")
