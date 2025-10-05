@@ -9,6 +9,7 @@ import smtplib
 import time
 import json
 import schedule
+import asyncio
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -208,20 +209,43 @@ def send_email(config, product):
         successful_sends = 0
         failed_sends = 0
         
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:  # Use SMTP with starttls
-            server.starttls()  # Enable encryption
-            server.login(sender_email, sender_password)
-            
-            for recipient in recipient_emails:
-                try:
-                    msg['To'] = recipient  # Set individual recipient
-                    server.send_message(msg)
-                    logger.info(f"📧 ✅ Email sent successfully to: {recipient}")
-                    successful_sends += 1
-                    del msg['To']  # Remove for next iteration
-                except Exception as e:
-                    logger.error(f"📧 ❌ Failed to send email to {recipient}: {e}")
-                    failed_sends += 1
+        # Retry logic for network issues
+        max_retries = 3
+        retry_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"📧 Attempting to connect to Gmail SMTP (attempt {attempt + 1}/{max_retries})...")
+                
+                with smtplib.SMTP('smtp.gmail.com', 587, timeout=30) as server:
+                    logger.info("📧 Connected to SMTP server, starting TLS...")
+                    server.starttls()
+                    logger.info("📧 Logging in...")
+                    server.login(sender_email, sender_password)
+                    logger.info("📧 Login successful! Sending emails...")
+                    
+                    for recipient in recipient_emails:
+                        try:
+                            msg['To'] = recipient
+                            server.send_message(msg)
+                            logger.info(f"📧 ✅ Email sent successfully to: {recipient}")
+                            successful_sends += 1
+                            del msg['To']
+                        except Exception as e:
+                            logger.error(f"📧 ❌ Failed to send email to {recipient}: {e}")
+                            failed_sends += 1
+                
+                # If we get here, emails were sent successfully
+                break
+                
+            except (smtplib.SMTPException, OSError, ConnectionError) as e:
+                logger.error(f"📧 ❌ SMTP connection error (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"📧 Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(f"📧 ❌ All retry attempts failed. Email not sent.")
+                    return False
         
         # Summary
         total_recipients = len(recipient_emails)
@@ -229,10 +253,12 @@ def send_email(config, product):
         if successful_sends > 0:
             logger.info(f"📧 🎉 Stock alert notification sent for {product['name']}")
         
-        return successful_sends > 0  # Return True if at least one email was sent
+        return successful_sends > 0
         
     except Exception as e:
-        logger.error(f"🚨 Failed to send emails. Error: {e}")
+        logger.error(f"🚨 Unexpected error sending emails: {e}")
+        import traceback
+        logger.error(f"🚨 Full trace: {traceback.format_exc()}")
         return False
 
 # --- Main Monitoring Job ---
@@ -845,7 +871,7 @@ class TelegramController:
             return False
 
 def run_telegram_bot():
-    """Run Telegram bot in background"""
+    """Run Telegram bot in background with proper async handling"""
     if not TELEGRAM_AVAILABLE:
         logger.info("⚠️ Telegram bot disabled - python-telegram-bot not installed")
         return
@@ -871,6 +897,10 @@ def run_telegram_bot():
             
         logger.info(f"🤖 Starting Telegram bot with {len(AUTHORIZED_USERS)} authorized users...")
         
+        # Create new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         controller = TelegramController(BOT_TOKEN, AUTHORIZED_USERS)
         application = Application.builder().token(BOT_TOKEN).build()
         
@@ -880,7 +910,7 @@ def run_telegram_bot():
         
         logger.info("🤖 Telegram Bot Controller started successfully!")
         
-        # Simple approach - let python-telegram-bot handle the event loop
+        # Run in the new event loop
         application.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
         
     except Exception as e:
