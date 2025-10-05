@@ -903,33 +903,36 @@ if __name__ == "__main__":
 
     # Start Flask health endpoint in background
     flask_thread = Thread(target=run_flask_app)
-    flask_thread.daemon = True  # Allow main thread to exit even if flask thread is still running
+    flask_thread.daemon = True
     flask_thread.start()
 
     # Check if Telegram bot is configured
     telegram_enabled = TELEGRAM_AVAILABLE and os.getenv('TELEGRAM_BOT_TOKEN')
     
     if telegram_enabled:
-        # If Telegram is configured, start monitoring in background and run bot in main thread
-        def run_monitoring_loop():
-            run_monitor()  # Initial check
-            schedule.every(10).minutes.do(run_monitor)
-            while True:
-                schedule.run_pending()
-                time.sleep(30)  # Check every 30 seconds
-        
-        monitor_thread = Thread(target=run_monitoring_loop)
-        monitor_thread.daemon = True
-        monitor_thread.start()
-
-        # Run Telegram bot in MAIN thread (this keeps the program alive)
-        run_telegram_bot()
-    else:
-        # If no Telegram bot, run monitoring in MAIN thread to keep program alive
-        logger.info("📧 Running in email-only mode (Telegram bot disabled)")
-        run_monitor()  # Initial check
-        schedule.every(10).minutes.do(run_monitor)
-        
-        while True:
-            schedule.run_pending()
-            time.sleep(30)  # Check every 30 seconds
+        # Start Telegram bot in background thread
+        logger.info("🤖 Starting Telegram bot in background...")
+        telegram_thread = Thread(target=run_telegram_bot)
+        telegram_thread.daemon = True
+        telegram_thread.start()
+        time.sleep(2)  # Give bot time to start
+    
+    # Always run monitoring in MAIN thread (keeps program alive)
+    logger.info("📧 Starting monitoring loop...")
+    run_monitor()  # Initial check
+    
+    # Get interval from config
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+            check_interval = config.get('monitoring', {}).get('check_interval_minutes', 10)
+    except:
+        check_interval = 10
+    
+    logger.info(f"⏰ Monitoring every {check_interval} minutes")
+    schedule.every(check_interval).minutes.do(run_monitor)
+    
+    # Main loop - keeps application alive
+    while True:
+        schedule.run_pending()
+        time.sleep(30)  # Check every 30 seconds
