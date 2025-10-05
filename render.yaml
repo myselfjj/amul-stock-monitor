@@ -12,8 +12,23 @@ services:
         value: "/usr/bin/google-chrome"
       - key: PYTHONUNBUFFERED
         value: "1"
-    # Health check endpoint (optional)
+      - key: PORT
+        value: "5000"
+      # Telegram Bot Configuration (Add your values in Render Dashboard)
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false  # Set this in Render Dashboard as secret
+      - key: TELEGRAM_AUTHORIZED_USERS
+        sync: false  # Set this in Render Dashboard (comma-separated user IDs)
+    
+    # Health check endpoint
     healthCheckPath: /health
     
     # Auto-restart on failure
     autoDeploy: true
+    
+    # Render free tier specifics
+    region: oregon  # or singapore for Asia
+    
+    # Build settings
+    buildCommand: echo "Using Dockerfile"
+    startCommand: python amul_email_monitor.py

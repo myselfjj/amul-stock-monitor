@@ -906,17 +906,30 @@ if __name__ == "__main__":
     flask_thread.daemon = True  # Allow main thread to exit even if flask thread is still running
     flask_thread.start()
 
-    # Start monitoring in background thread instead of main thread
-    def run_monitoring_loop():
+    # Check if Telegram bot is configured
+    telegram_enabled = TELEGRAM_AVAILABLE and os.getenv('TELEGRAM_BOT_TOKEN')
+    
+    if telegram_enabled:
+        # If Telegram is configured, start monitoring in background and run bot in main thread
+        def run_monitoring_loop():
+            run_monitor()  # Initial check
+            schedule.every(10).minutes.do(run_monitor)
+            while True:
+                schedule.run_pending()
+                time.sleep(30)  # Check every 30 seconds
+        
+        monitor_thread = Thread(target=run_monitoring_loop)
+        monitor_thread.daemon = True
+        monitor_thread.start()
+
+        # Run Telegram bot in MAIN thread (this keeps the program alive)
+        run_telegram_bot()
+    else:
+        # If no Telegram bot, run monitoring in MAIN thread to keep program alive
+        logger.info("📧 Running in email-only mode (Telegram bot disabled)")
         run_monitor()  # Initial check
         schedule.every(10).minutes.do(run_monitor)
+        
         while True:
             schedule.run_pending()
             time.sleep(30)  # Check every 30 seconds
-    
-    monitor_thread = Thread(target=run_monitoring_loop)
-    monitor_thread.daemon = True
-    monitor_thread.start()
-
-    # Run Telegram bot in MAIN thread (this should fix the asyncio issue)
-    run_telegram_bot()
